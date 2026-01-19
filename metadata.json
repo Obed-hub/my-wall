@@ -1,0 +1,8 @@
+{
+  "name": "My Wall",
+  "description": "A personal, secure, cross-device platform to capture and sync your thoughts, photos, and videos.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}

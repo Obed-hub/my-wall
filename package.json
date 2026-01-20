@@ -6,13 +6,16 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "firebase:deploy": "firebase deploy --only firestore:rules,storage:rules",
+    "firebase:login": "firebase login"
   },
   "dependencies": {
-    "react": "18.3.1",
-    "react-dom": "18.3.1",
     "@google/genai": "^1.37.0",
-    "firebase": "^12.8.0"
+    "cloudinary-core": "^2.14.0",
+    "firebase": "^12.8.0",
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",

@@ -1,31 +1,28 @@
 import { Post, MediaType, UserProfile, OperationResult } from '../types';
-import { auth, db, storage } from '../firebase';
-import { 
-  signInWithEmailAndPassword, 
-  createUserWithEmailAndPassword, 
-  signOut, 
+import { auth, db } from '../firebase';
+import {
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  signOut,
   onAuthStateChanged,
   updateProfile,
   User,
   GoogleAuthProvider,
   signInWithPopup
 } from 'firebase/auth';
-import { 
-  collection, 
-  addDoc, 
-  getDocs, 
-  deleteDoc, 
-  doc, 
-  query, 
-  where, 
-  orderBy 
+import {
+  collection,
+  addDoc,
+  getDocs,
+  deleteDoc,
+  doc,
+  getDoc,
+  query,
+  where,
+  orderBy
 } from 'firebase/firestore';
-import { 
-  ref, 
-  uploadBytes, 
-  getDownloadURL 
-} from 'firebase/storage';
 import { compressImage } from './compression';
+import { uploadToCloudinary, deleteFromCloudinary } from './cloudinary';
 
 // Helper to map Firebase User to our UserProfile
 const mapUser = (user: User): UserProfile => ({
@@ -108,11 +105,11 @@ export const api = {
 
       // Query posts only for the current user, ordered by newest first
       const q = query(
-        collection(db, "posts"), 
+        collection(db, "posts"),
         where("userId", "==", currentUser.uid),
         orderBy("createdAt", "desc")
       );
-      
+
       const querySnapshot = await getDocs(q);
       const posts: Post[] = querySnapshot.docs.map(doc => ({
         id: doc.id,
@@ -126,33 +123,59 @@ export const api = {
     }
   },
 
-  createPost: async (content: string, mediaFile: File | null, mediaType: MediaType): Promise<OperationResult<Post>> => {
+  createPost: async (content: string, mediaFiles: File[] | null, mediaType: MediaType): Promise<OperationResult<Post>> => {
     try {
       const currentUser = auth.currentUser;
       if (!currentUser) throw new Error("Not authenticated");
 
       let mediaUrl = undefined;
       let fileName = undefined;
+      const uploadedFiles: any[] = [];
 
-      // 1. Handle File Upload
-      if (mediaFile) {
-        let fileToUpload = mediaFile;
-        fileName = mediaFile.name;
+      // 1. Handle Multiple File Uploads to Cloudinary
+      if (mediaFiles && mediaFiles.length > 0) {
+        // Limit to 7 files
+        const filesToUpload = mediaFiles.slice(0, 7);
 
-        // Compress if it's an image
-        if (mediaType === MediaType.IMAGE) {
-           fileToUpload = await compressImage(mediaFile);
+        for (const file of filesToUpload) {
+          let fileToUpload = file;
+          const fileType = file.type;
+
+          // Optimize file based on type
+          if (fileType.startsWith('image/')) {
+            fileToUpload = await compressImage(file);
+          }
+
+          // Upload to Cloudinary
+          const uploadResult = await uploadToCloudinary(fileToUpload);
+
+          if (!uploadResult.success) {
+            throw new Error(uploadResult.error || `Failed to upload ${file.name}`);
+          }
+
+          // Determine media type for this file
+          let fileMediaType = MediaType.OTHER;
+          if (fileType.startsWith('image/')) fileMediaType = MediaType.IMAGE;
+          else if (fileType.startsWith('video/')) fileMediaType = MediaType.VIDEO;
+          else if (fileType.startsWith('audio/')) fileMediaType = MediaType.AUDIO;
+          else if (fileType.includes('pdf') || fileType.includes('document') || fileType.includes('text/')) {
+            fileMediaType = MediaType.DOCUMENT;
+          }
+
+          uploadedFiles.push({
+            url: uploadResult.url,
+            type: fileMediaType,
+            fileName: file.name,
+            size: file.size,
+            publicId: uploadResult.publicId
+          });
         }
 
-        // Create a reference to 'uploads/<uid>/<timestamp>_<filename>'
-        const storagePath = `${Date.now()}_${fileToUpload.name}`;
-        const storageRef = ref(storage, `uploads/${currentUser.uid}/${storagePath}`);
-        
-        // Upload
-        await uploadBytes(storageRef, fileToUpload);
-        
-        // Get URL
-        mediaUrl = await getDownloadURL(storageRef);
+        // For backward compatibility, set first file as primary
+        if (uploadedFiles.length > 0) {
+          mediaUrl = uploadedFiles[0].url;
+          fileName = uploadedFiles[0].fileName;
+        }
       }
 
       const newPostData = {
@@ -161,6 +184,7 @@ export const api = {
         mediaType,
         mediaUrl: mediaUrl || null,
         fileName: fileName || null,
+        mediaFiles: uploadedFiles.length > 0 ? uploadedFiles : null,
         createdAt: Date.now(),
         aiEnhanced: false // Can be passed in if needed, defaulting false for now
       };
@@ -168,9 +192,9 @@ export const api = {
       // 2. Save Metadata to Firestore
       const docRef = await addDoc(collection(db, "posts"), newPostData);
 
-      return { 
-        success: true, 
-        data: { id: docRef.id, ...newPostData } as Post 
+      return {
+        success: true,
+        data: { id: docRef.id, ...newPostData } as Post
       };
 
     } catch (e: any) {
@@ -178,11 +202,40 @@ export const api = {
       return { success: false, error: e.message };
     }
   },
-  
+
   deletePost: async (postId: string): Promise<OperationResult<void>> => {
     try {
-       await deleteDoc(doc(db, "posts", postId));
-       return { success: true };
+      // Step 1: Fetch the post to get file metadata
+      const postRef = doc(db, "posts", postId);
+      const postSnap = await getDoc(postRef);
+
+      if (!postSnap.exists()) {
+        return { success: false, error: "Post not found" };
+      }
+
+      const postData = postSnap.data() as Post;
+
+      // Step 2: Delete files from Cloudinary (if any)
+      if (postData.mediaFiles && postData.mediaFiles.length > 0) {
+        console.log(`🗑️ Deleting ${postData.mediaFiles.length} file(s) from Cloudinary...`);
+
+        for (const mediaFile of postData.mediaFiles) {
+          if (mediaFile.publicId) {
+            const deleted = await deleteFromCloudinary(mediaFile.publicId);
+            if (deleted) {
+              console.log(`✅ Deleted: ${mediaFile.fileName}`);
+            } else {
+              console.warn(`⚠️ Failed to delete: ${mediaFile.fileName}`);
+            }
+          }
+        }
+      }
+
+      // Step 3: Delete the Firestore document
+      await deleteDoc(postRef);
+      console.log('✅ Post deleted successfully from Firestore');
+
+      return { success: true };
     } catch (e: any) {
       console.error("Delete Post Error:", e);
       return { success: false, error: e.message };

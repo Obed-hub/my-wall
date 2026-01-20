@@ -13,13 +13,22 @@ export interface UserProfile {
   displayName: string | null;
 }
 
+export interface MediaFile {
+  url: string;
+  type: MediaType;
+  fileName: string;
+  size?: number; // File size in bytes
+  publicId?: string; // Cloudinary public ID for deletion
+}
+
 export interface Post {
   id: string;
   userId: string;
   content: string; // The text content or caption
   mediaType: MediaType;
-  mediaUrl?: string; // URL for image or video
-  fileName?: string; // Original filename for documents
+  mediaUrl?: string; // URL for image or video (legacy, kept for backward compatibility)
+  fileName?: string; // Original filename for documents (legacy)
+  mediaFiles?: MediaFile[]; // Multiple media files (new)
   createdAt: number; // Timestamp
   aiEnhanced?: boolean; // If text was polished by Gemini
 }

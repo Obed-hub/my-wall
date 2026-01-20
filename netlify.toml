@@ -1,0 +1,10 @@
+# Netlify Build Configuration
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+# Environment variables for all contexts
+[build.environment]
+  # Tell Netlify's secrets scanner to ignore Cloudinary variables
+  # These are public-facing values meant to be in the client bundle
+  SECRETS_SCAN_OMIT_KEYS = "VITE_CLOUDINARY_CLOUD_NAME,VITE_CLOUDINARY_UPLOAD_PRESET"

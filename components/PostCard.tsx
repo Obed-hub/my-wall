@@ -9,6 +9,7 @@ interface PostCardProps {
 
 const PostCard: React.FC<PostCardProps> = ({ post, onDelete }) => {
   const [selectedImage, setSelectedImage] = useState<number>(0);
+  const [copied, setCopied] = useState(false);
 
   const dateStr = new Date(post.createdAt).toLocaleDateString(undefined, {
     month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
@@ -27,6 +28,39 @@ const PostCard: React.FC<PostCardProps> = ({ post, onDelete }) => {
   const videos = mediaFiles.filter(f => f.type === MediaType.VIDEO);
   const audios = mediaFiles.filter(f => f.type === MediaType.AUDIO);
   const documents = mediaFiles.filter(f => f.type === MediaType.DOCUMENT || f.type === MediaType.OTHER);
+
+  // Download file handler
+  const handleDownload = async (url: string, fileName: string) => {
+    try {
+      const response = await fetch(url);
+      const blob = await response.blob();
+      const blobUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(blobUrl);
+    } catch (error) {
+      console.error('Download failed:', error);
+      // Fallback: open in new tab
+      window.open(url, '_blank');
+    }
+  };
+
+  // Copy text to clipboard
+  const handleCopyText = async () => {
+    if (!post.content) return;
+
+    try {
+      await navigator.clipboard.writeText(post.content);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (error) {
+      console.error('Copy failed:', error);
+    }
+  };
 
   // Helper to get file icon
   const getFileIcon = (fileName: string) => {
@@ -52,11 +86,23 @@ const PostCard: React.FC<PostCardProps> = ({ post, onDelete }) => {
               className="w-full h-full object-cover"
               loading="lazy"
             />
+
+            {/* Image counter */}
             {images.length > 1 && (
               <div className="absolute top-2 right-2 bg-black/60 text-white text-xs px-2 py-1 rounded-full">
                 {selectedImage + 1} / {images.length}
               </div>
             )}
+
+            {/* Download button - appears on hover */}
+            <button
+              onClick={() => handleDownload(images[selectedImage].url, images[selectedImage].fileName)}
+              className="absolute bottom-2 right-2 bg-black/60 hover:bg-black/80 text-white px-3 py-2 rounded-lg flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity"
+              title="Download image"
+            >
+              <i className="fas fa-download"></i>
+              <span className="text-xs">Download</span>
+            </button>
           </div>
 
           {/* Image Thumbnails */}
@@ -81,8 +127,16 @@ const PostCard: React.FC<PostCardProps> = ({ post, onDelete }) => {
 
       {/* Videos */}
       {videos.map((video, idx) => (
-        <div key={`video-${idx}`} className="relative w-full aspect-video bg-black">
+        <div key={`video-${idx}`} className="relative w-full aspect-video bg-black group/video">
           <video src={video.url} controls className="w-full h-full" />
+          <button
+            onClick={() => handleDownload(video.url, video.fileName)}
+            className="absolute top-2 right-2 bg-black/60 hover:bg-black/80 text-white px-3 py-2 rounded-lg flex items-center gap-2 opacity-0 group-hover/video:opacity-100 transition-opacity"
+            title="Download video"
+          >
+            <i className="fas fa-download"></i>
+            <span className="text-xs">Download</span>
+          </button>
         </div>
       ))}
 
@@ -91,10 +145,20 @@ const PostCard: React.FC<PostCardProps> = ({ post, onDelete }) => {
         <div className="p-4 bg-gray-50 dark:bg-gray-900 border-b border-gray-100 dark:border-gray-700 space-y-2">
           {audios.map((audio, idx) => (
             <div key={`audio-${idx}`} className="space-y-1">
-              <p className="text-xs text-gray-600 dark:text-gray-400 flex items-center gap-2">
-                <i className="fas fa-music"></i>
-                {audio.fileName}
-              </p>
+              <div className="flex items-center justify-between">
+                <p className="text-xs text-gray-600 dark:text-gray-400 flex items-center gap-2">
+                  <i className="fas fa-music"></i>
+                  {audio.fileName}
+                </p>
+                <button
+                  onClick={() => handleDownload(audio.url, audio.fileName)}
+                  className="text-xs text-brand-500 hover:text-brand-600 flex items-center gap-1"
+                  title="Download audio"
+                >
+                  <i className="fas fa-download"></i>
+                  Download
+                </button>
+              </div>
               <audio src={audio.url} controls className="w-full" />
             </div>
           ))}
@@ -105,11 +169,8 @@ const PostCard: React.FC<PostCardProps> = ({ post, onDelete }) => {
       {documents.length > 0 && (
         <div className="p-4 bg-gray-50 dark:bg-gray-900 border-b border-gray-100 dark:border-gray-700 space-y-2">
           {documents.map((doc, idx) => (
-            <a
+            <div
               key={`doc-${idx}`}
-              href={doc.url}
-              target="_blank"
-              rel="noopener noreferrer"
               className="flex items-center gap-3 p-3 bg-white dark:bg-dark-800 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-dark-700 transition-colors shadow-sm"
             >
               <div className={`${doc.type === MediaType.DOCUMENT ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-500' : 'bg-gray-100 dark:bg-gray-700 text-gray-500'} p-2.5 rounded-lg`}>
@@ -123,11 +184,17 @@ const PostCard: React.FC<PostCardProps> = ({ post, onDelete }) => {
                   {doc.size && doc.size > 0 && (
                     <span className="text-xs text-gray-500">{formatFileSize(doc.size)}</span>
                   )}
-                  <span className="text-xs text-gray-400">• Tap to download</span>
-                  <i className="fas fa-download text-[10px] text-gray-400"></i>
                 </div>
               </div>
-            </a>
+              <button
+                onClick={() => handleDownload(doc.url, doc.fileName)}
+                className="bg-brand-500 hover:bg-brand-600 text-white px-3 py-1.5 rounded-lg text-xs flex items-center gap-1 transition-colors"
+                title="Download file"
+              >
+                <i className="fas fa-download"></i>
+                Download
+              </button>
+            </div>
           ))}
         </div>
       )}
@@ -135,9 +202,27 @@ const PostCard: React.FC<PostCardProps> = ({ post, onDelete }) => {
       {/* Text Content */}
       <div className="p-4">
         {post.content && (
-          <p className="text-gray-800 dark:text-gray-200 whitespace-pre-wrap text-sm leading-relaxed">
-            {post.content}
-          </p>
+          <div className="relative group/text">
+            <p className="text-gray-800 dark:text-gray-200 whitespace-pre-wrap text-sm leading-relaxed pr-8">
+              {post.content}
+            </p>
+
+            {/* Copy button */}
+            <button
+              onClick={handleCopyText}
+              className="absolute top-0 right-0 text-gray-400 hover:text-brand-500 opacity-0 group-hover/text:opacity-100 transition-all"
+              title="Copy text"
+            >
+              {copied ? (
+                <span className="flex items-center gap-1 text-green-500 text-xs">
+                  <i className="fas fa-check"></i>
+                  Copied!
+                </span>
+              ) : (
+                <i className="fas fa-copy"></i>
+              )}
+            </button>
+          </div>
         )}
 
         {/* Footer info */}
